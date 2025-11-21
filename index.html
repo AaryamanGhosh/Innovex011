@@ -806,6 +806,14 @@
     </main>
 
     <script>
+        // ---------- CONFIG ----------
+  // Use localhost during development; change to your deployed URL for production.
+  const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:3000'
+    : 'https://your-production-api.example.com'; // <- CHANGE when you deploy backend
+
+  const DEMO_API_KEY = 'demo123'; // only for dev testing if your server expects api_key
+  // -----------------------------
         // --- I18N & TRANSLATIONS ---
         const translations = {
             en: {
@@ -1324,29 +1332,83 @@
   }
 
   // Call weather endpoint by coordinates (falls back to city)
-  async function fetchWeatherAndShow({ city, lat, lon }) {
-    try {
-      let q = '';
-      if (city) q = `city=${encodeURIComponent(city)}`;
-      else q = `lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
-      const resp = await fetch(`/v1/weather/recommendation?${q}`);
-      if (!resp.ok) throw new Error('Weather fetch failed');
-      const data = await resp.json();
+ async function fetchWeatherAndShow({ lat, lon }) {
+  try {
+    if (!lat || !lon) throw new Error('lat/lon required');
 
-      // Display a simple card in #newsList (create or reuse)
-      const container = document.getElementById('newsList') || document.body;
-      const card = document.createElement('div');
-      card.className = 'news-card';
-      card.innerHTML = `<div><strong>Weather for ${data.location.name || (lat+','+lon)}</strong></div>
-                        <div>Temp: ${data.weather.temperature}°C, ${data.weather.description}</div>
-                        <div><strong>Recommendations:</strong><ul>${data.recommendations.map(r=>'<li>'+r+'</li>').join('')}</ul></div>`;
-      container.prepend(card);
-      return data;
-    } catch (e) {
-      console.error(e);
-      alert('Weather error: ' + e.message);
+    // Build URL using API_BASE (important to avoid origin mistakes)
+    const url = `${API_BASE}/v1/weather/recommendation?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&api_key=${DEMO_API_KEY}`;
+
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`Server returned ${resp.status}: ${txt}`);
     }
+    const data = await resp.json();
+
+    // Example: fill display card or element with weather + recommendations
+    // (adapt element ids to your HTML)
+    const addr = data.location?.name ? `${data.location.name}, ${data.location.country || ''}` : `${lat}, ${lon}`;
+    document.getElementById('input-address').value = addr;
+
+    // Display recommendations: simple list (adjust to match your UI)
+    const list = document.getElementById('weather-recommendations') || createRecommendationsHolder();
+    list.innerHTML = '';
+    (data.recommendations || []).forEach(r => {
+      const li = document.createElement('div');
+      li.className = 'rec-item';
+      li.textContent = typeof r === 'string' ? r : (r.title || r.detail || JSON.stringify(r));
+      list.appendChild(li);
+    });
+
+    return data; // useful if caller wants to inspect
+  } catch (err) {
+    console.error('Weather fetch failed', err);
+    alert('Weather fetch failed: ' + (err.message || err));
+    throw err;
   }
+}
+
+// helper: create a holder if it doesn't exist
+function createRecommendationsHolder() {
+  const holder = document.createElement('div');
+  holder.id = 'weather-recommendations';
+  holder.style = 'margin-top:12px;color:#b4f8c8';
+  const container = document.querySelector('.glass-card') || document.body;
+  container.appendChild(holder);
+  return holder;
+}
+function detectLocationAndFill() {
+  const btn = document.getElementById('btn-detect-location');
+  if (!navigator.geolocation) { alert('Geolocation not supported'); return; }
+
+  btn.disabled = true; btn.textContent = 'Detecting...';
+
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    try {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+
+      // fill hidden fields
+      const latEl = document.getElementById('input-lat');
+      const lonEl = document.getElementById('input-lon');
+      if (latEl) latEl.value = lat;
+      if (lonEl) lonEl.value = lon;
+
+      // call backend to get location name + recs
+      await fetchWeatherAndShow({ lat, lon });
+
+    } catch (err) {
+      console.error(err);
+      alert('Failed to detect or fetch weather: ' + (err.message || err));
+    } finally {
+      btn.disabled = false; btn.textContent = 'Detect Location';
+    }
+  }, (err) => {
+    btn.disabled = false; btn.textContent = 'Detect Location';
+    alert('Unable to get your location: ' + err.message);
+  }, { enableHighAccuracy: true, timeout: 10000 });
+}
 
   // Ask server to translate + return audio, then play it
   async function translateAndPlay(text, targetLang='hi') {
