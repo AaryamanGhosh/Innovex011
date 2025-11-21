@@ -1283,5 +1283,104 @@
         // Expose functions for inline onclick
         Object.assign(window, { returnHome, showLoginSelection, showAdminAuth, showFarmerAuth, verifyAdminPassword, verifyFarmerLogin, logoutFromFarmer, viewFarmerDetails, deleteFarmer, closeDanModal, toggleChat, sendUserMessage, openSellModal, closeSellModal, submitSellOffer, acceptSellOffer, declineSellOffer, renderAdminSellOffers, refreshFarmerOffersUI, updateSellBadges, handleFormSubmit, handleProductFormSubmit, deleteAdminProduct, buyProduct, changeLanguage, toggleNews });
     </script>
+    <script>
+  // Play base64 mp3 audio returned from server
+  function playBase64Mp3(base64) {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: 'audio/mpeg' });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.play().finally(() => URL.revokeObjectURL(url));
+  }
+
+  // Call weather endpoint by coordinates (falls back to city)
+  async function fetchWeatherAndShow({ city, lat, lon }) {
+    try {
+      let q = '';
+      if (city) q = `city=${encodeURIComponent(city)}`;
+      else q = `lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+      const resp = await fetch(`/v1/weather/recommendation?${q}`);
+      if (!resp.ok) throw new Error('Weather fetch failed');
+      const data = await resp.json();
+
+      // Display a simple card in #newsList (create or reuse)
+      const container = document.getElementById('newsList') || document.body;
+      const card = document.createElement('div');
+      card.className = 'news-card';
+      card.innerHTML = `<div><strong>Weather for ${data.location.name || (lat+','+lon)}</strong></div>
+                        <div>Temp: ${data.weather.temperature}°C, ${data.weather.description}</div>
+                        <div><strong>Recommendations:</strong><ul>${data.recommendations.map(r=>'<li>'+r+'</li>').join('')}</ul></div>`;
+      container.prepend(card);
+      return data;
+    } catch (e) {
+      console.error(e);
+      alert('Weather error: ' + e.message);
+    }
+  }
+
+  // Ask server to translate + return audio, then play it
+  async function translateAndPlay(text, targetLang='hi') {
+    try {
+      const resp = await fetch('/v1/guide/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, language: targetLang })
+      });
+      if (!resp.ok) throw new Error('Translate failed');
+      const body = await resp.json();
+      // show the translated text
+      const container = document.getElementById('newsList') || document.body;
+      const card = document.createElement('div');
+      card.className = 'news-card';
+      card.innerHTML = `<div><strong>Translated (${body.language})</strong></div>
+                        <div>${body.translated_text}</div>
+                        <div><button onclick='playBase64Mp3("${body.audio_base64}")'>Play Audio</button></div>`;
+      container.prepend(card);
+
+      // auto-play
+      playBase64Mp3(body.audio_base64);
+    } catch (e) {
+      console.error(e);
+      alert('Translate/TTS error: ' + e.message);
+    }
+  }
+
+  // Demo helper button actions (wire these into your UI)
+  async function demoWeatherFlow() {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(async pos => {
+        const lat = pos.coords.latitude, lon = pos.coords.longitude;
+        const data = await fetchWeatherAndShow({ lat, lon });
+        // build a spoken summary to translate & speak in local language (example)
+        if (data) {
+          const summary = `Now ${data.weather.temperature} degrees Celsius. Recommendations: ${data.recommendations.slice(0,3).join('. ')}`;
+          // ask server to translate to Hindi (hi) and produce audio
+          await translateAndPlay(summary, 'hi');
+        }
+      }, async err => {
+        console.warn('Geolocation not available or denied, using sample city');
+        const data = await fetchWeatherAndShow({ city: 'Bengaluru' });
+        if (data) {
+          const summary = `Now ${data.weather.temperature} degrees Celsius. Recommendations: ${data.recommendations.slice(0,3).join('. ')}`;
+          await translateAndPlay(summary, 'hi');
+        }
+      });
+    } else {
+      alert('Geolocation not supported'); 
+    }
+  }
+
+  // Example: attach to existing button id btnWeatherDemo
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('btnWeatherDemo');
+    if (btn) btn.addEventListener('click', demoWeatherFlow);
+  });
+</script>
+
 </body>
 </html>
